@@ -59,11 +59,15 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: any, label:
   </button>
 );
 
-const GlassCard = ({ children, className }: { children: React.ReactNode, className?: string }) => (
-  <div className={cn(
-    "bg-white/60 dark:bg-zinc-900/40 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm dark:shadow-2xl transition-colors duration-300",
-    className
-  )}>
+const GlassCard = ({ children, className, onClick }: { children: React.ReactNode, className?: string, onClick?: () => void }) => (
+  <div 
+    onClick={onClick}
+    className={cn(
+      "bg-white/60 dark:bg-zinc-900/40 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm dark:shadow-2xl transition-colors duration-300",
+      onClick ? "cursor-pointer" : "",
+      className
+    )}
+  >
     {children}
   </div>
 );
@@ -592,19 +596,86 @@ const PullRequestDetail = ({ id, onBack, language }: { id: string, onBack: () =>
   );
 };
 
-const CreateModal = ({ isOpen, onClose, type, language }: { isOpen: boolean, onClose: () => void, type: 'repo' | 'issue' | 'pr', language: Language }) => {
+const RepoList = ({ onSelect, language }: { onSelect: (owner: string, name: string) => void, language: Language }) => {
+  const { t } = useTranslation(language);
+  const [repos, setRepos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/repos')
+      .then(res => res.json())
+      .then(data => {
+        setRepos(data);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <div className="p-10 text-center text-zinc-500">{t('loadingFiles')}</div>;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {repos.map(repo => (
+        <GlassCard key={repo.id} className="p-6 hover:border-emerald-500/30 transition-all cursor-pointer group" onClick={() => onSelect(repo.owner, repo.name)}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <BookText size={20} className="text-emerald-500" />
+              <h3 className="text-lg font-bold group-hover:text-emerald-500 transition-colors">{repo.name}</h3>
+            </div>
+            <span className="px-2 py-0.5 rounded-full border border-zinc-200 dark:border-white/10 text-[10px] text-zinc-500 uppercase tracking-wider">{repo.visibility}</span>
+          </div>
+          <p className="text-sm text-zinc-500 mb-6 line-clamp-2 h-10">{repo.description || "No description provided."}</p>
+          <div className="flex items-center gap-4 text-xs text-zinc-500">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+              {repo.language}
+            </div>
+            <div className="flex items-center gap-1">
+              <Star size={14} />
+              {repo.stars}
+            </div>
+            <div className="flex items-center gap-1">
+              <GitFork size={14} />
+              {repo.forks}
+            </div>
+          </div>
+        </GlassCard>
+      ))}
+    </div>
+  );
+};
+
+const CreateModal = ({ isOpen, onClose, type, language, onSuccess }: { isOpen: boolean, onClose: () => void, type: 'repo' | 'issue' | 'pr', language: Language, onSuccess: () => void }) => {
   const { t } = useTranslation(language);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert(t('newRepoSuccess'));
-    onClose();
-    setName("");
-    setDescription("");
+    setLoading(true);
+    try {
+      const endpoint = type === 'repo' ? '/api/repos' : type === 'issue' ? '/api/issues' : '/api/prs';
+      const body = type === 'repo' ? { name, description } : { title: name, description };
+      
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (res.ok) {
+        onSuccess();
+        onClose();
+        setName("");
+        setDescription("");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -650,12 +721,12 @@ const CreateModal = ({ isOpen, onClose, type, language }: { isOpen: boolean, onC
             />
           </div>
           
-          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-3">
-            <AlertCircle size={18} className="text-amber-500 mt-0.5 shrink-0" />
-            <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
+            <CheckCircle2 size={18} className="text-emerald-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-emerald-600 dark:text-emerald-400 leading-relaxed">
               {language === 'de' 
-                ? "Dies ist eine Demo-Anwendung. Das Erstellen von echten Repositories ist in dieser Vorschau nicht möglich."
-                : "This is a demo application. Creating real repositories is not possible in this preview."}
+                ? "Dieses Repository wird lokal in der SQLite-Datenbank gespeichert."
+                : "This repository will be stored locally in the SQLite database."}
             </p>
           </div>
 
@@ -669,9 +740,10 @@ const CreateModal = ({ isOpen, onClose, type, language }: { isOpen: boolean, onC
             </button>
             <button 
               type="submit"
-              className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black text-sm font-bold transition-all shadow-lg shadow-emerald-500/20"
+              disabled={loading}
+              className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white dark:text-black text-sm font-bold transition-all shadow-lg shadow-emerald-500/20"
             >
-              {t('create')}
+              {loading ? t('loadingFiles') : t('create')}
             </button>
           </div>
         </form>
@@ -688,6 +760,7 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [language, setLanguage] = useState<Language>('en');
   const [selectedPR, setSelectedPR] = useState<string | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<{owner: string, name: string} | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createType, setCreateType] = useState<'repo' | 'issue' | 'pr'>('repo');
   const [isCodeDropdownOpen, setIsCodeDropdownOpen] = useState(false);
@@ -695,10 +768,14 @@ export default function App() {
 
   const { t } = useTranslation(language);
 
-  useEffect(() => {
+  const refreshData = () => {
     fetch('/api/dashboard')
       .then(res => res.json())
       .then(data => setDashboardData(data));
+  };
+
+  useEffect(() => {
+    refreshData();
   }, []);
 
   useEffect(() => {
@@ -732,6 +809,7 @@ export default function App() {
           <SidebarItem icon={CircleDot} label={t('issues')} active={activeTab === 'issues'} onClick={() => setActiveTab('issues')} />
           <SidebarItem icon={GitPullRequest} label={t('pullRequests')} active={activeTab === 'prs'} onClick={() => setActiveTab('prs')} />
           <SidebarItem icon={Users} label={t('organizations')} active={activeTab === 'orgs'} onClick={() => setActiveTab('orgs')} />
+          <SidebarItem icon={FileCode} label="Source Viewer" active={activeTab === 'source'} onClick={() => window.open('/api/project-source', '_blank')} />
         </nav>
 
         <div className="mt-auto pt-6 border-t border-zinc-200 dark:border-white/5 space-y-2">
@@ -786,203 +864,232 @@ export default function App() {
             >
               {activeTab === 'repos' && (
                 <div className="space-y-8">
-                  <header className="flex items-end justify-between">
-                    <div>
-                      <div className="flex items-center gap-3 text-zinc-500 text-sm mb-2">
-                        <Users size={14} />
-                        <span>git-nexus</span>
-                        <ChevronRight size={14} />
-                        <span className="text-white font-medium">git-nexus-core</span>
-                        <span className="px-2 py-0.5 rounded-full border border-white/10 text-[10px] uppercase tracking-wider">{t('public')}</span>
-                      </div>
-                      <h1 className="text-3xl font-bold tracking-tight">git-nexus-core</h1>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm font-medium hover:bg-white/10 transition-all">
-                        <Star size={16} />
-                        {t('star')}
-                        <span className="pl-2 border-l border-white/10 ml-1 text-zinc-500">1.2k</span>
-                      </button>
-                      <button className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm font-medium hover:bg-white/10 transition-all">
-                        <GitFork size={16} />
-                        {t('fork')}
-                        <span className="pl-2 border-l border-white/10 ml-1 text-zinc-500">89</span>
-                      </button>
-                    </div>
-                  </header>
-
-                  <div className="flex items-center gap-6 border-b border-white/5 pb-4">
-                    <button className="text-sm font-medium text-emerald-400 border-b-2 border-emerald-400 pb-4 -mb-4">{t('code')}</button>
-                    <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('issues')}</button>
-                    <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('pullRequests')}</button>
-                    <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('actions')}</button>
-                    <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('projects')}</button>
-                    <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('wiki')}</button>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-10">
-                    <div className="lg:col-span-3 space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <button className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-medium hover:bg-white/10 transition-all">
-                            <GitBranch size={14} />
-                            main
-                          </button>
-                          <div className="flex items-center gap-2 text-xs text-zinc-500">
-                            <GitBranch size={14} />
-                            <span className="font-medium text-zinc-300">3</span> branches
-                            <span className="mx-1">•</span>
-                            <History size={14} />
-                            <span className="font-medium text-zinc-300">124</span> tags
-                          </div>
+                  {!selectedRepo ? (
+                    <>
+                      <header className="flex items-center justify-between">
+                        <div>
+                          <h1 className="text-3xl font-bold tracking-tight mb-2 text-zinc-900 dark:text-white">{t('repositories')}</h1>
+                          <p className="text-zinc-500">{t('managePreferences')}</p>
                         </div>
-                        <div className="flex items-center gap-2 relative">
-                          <button 
-                            onClick={() => setIsCodeDropdownOpen(!isCodeDropdownOpen)}
-                            className="flex items-center gap-2 px-4 py-1.5 bg-emerald-500 text-white dark:text-black text-xs font-bold rounded-lg hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
-                          >
-                            <Terminal size={14} />
-                            {t('code')}
-                            <ChevronDown size={14} className={cn("transition-transform", isCodeDropdownOpen && "rotate-180")} />
-                          </button>
-
-                          <AnimatePresence>
-                            {isCodeDropdownOpen && (
-                              <>
-                                <div 
-                                  className="fixed inset-0 z-40" 
-                                  onClick={() => setIsCodeDropdownOpen(false)} 
-                                />
-                                <motion.div
-                                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                  className="absolute top-full right-0 mt-2 w-80 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden"
-                                >
-                                  <div className="p-4 border-b border-zinc-100 dark:border-white/5">
-                                    <div className="flex items-center gap-2 mb-3">
-                                      <Terminal size={16} className="text-emerald-500" />
-                                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{t('clone')}</span>
-                                    </div>
-                                    <div className="flex bg-zinc-100 dark:bg-white/5 p-1 rounded-lg mb-3">
-                                      <button className="flex-1 py-1 text-[10px] font-bold bg-white dark:bg-white/10 rounded-md shadow-sm">{t('https')}</button>
-                                      <button className="flex-1 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">{t('ssh')}</button>
-                                      <button className="flex-1 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">{t('githubCli')}</button>
-                                    </div>
-                                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-lg p-2">
-                                      <code className="text-[10px] text-zinc-600 dark:text-zinc-400 truncate flex-1">https://github.com/git-nexus/core.git</code>
-                                      <button 
-                                        onClick={() => {
-                                          setCopied(true);
-                                          setTimeout(() => setCopied(false), 2000);
-                                        }}
-                                        className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded-md transition-colors text-zinc-500"
-                                      >
-                                        {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <button 
-                                    onClick={() => {
-                                      alert(t('downloadingZip'));
-                                      setIsCodeDropdownOpen(false);
-                                    }}
-                                    className="w-full p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors flex items-center gap-3"
-                                  >
-                                    <Download size={16} className="text-zinc-400" />
-                                    <div className="text-xs">
-                                      <p className="font-bold text-zinc-900 dark:text-white">{t('downloadZip')}</p>
-                                    </div>
-                                  </button>
-                                </motion.div>
-                              </>
-                            )}
-                          </AnimatePresence>
-
-                          <button 
-                            onClick={() => alert(t('downloadingZip'))}
-                            className="flex items-center gap-2 px-4 py-1.5 bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white text-xs font-bold rounded-lg hover:bg-zinc-200 dark:hover:bg-white/20 transition-all border border-zinc-200 dark:border-white/10"
-                          >
-                            <Download size={14} />
-                            {t('downloadZip')}
-                          </button>
-                        </div>
-                      </div>
-
-                      <FileExplorer owner="git-nexus" repo="git-nexus-core" language={language} />
-
-                      {/* README Preview */}
-                      <GlassCard className="border-white/10">
-                        <div className="bg-white/5 px-6 py-3 border-b border-white/5 flex items-center gap-2">
-                          <BookText size={16} className="text-zinc-500" />
-                          <span className="text-sm font-medium uppercase tracking-wider text-zinc-400">README.md</span>
-                        </div>
-                        <div className="p-10 prose prose-invert max-w-none">
-                          <h1 className="text-3xl font-bold mb-6">GitNexus Core</h1>
-                          <p className="text-zinc-400 mb-4">The high-performance engine powering the next generation of Git repository management.</p>
-                          <h2 className="text-xl font-bold mt-8 mb-4">Features</h2>
-                          <ul className="list-disc list-inside space-y-2 text-zinc-400">
-                            <li>Ultra-fast Git operations using native binaries</li>
-                            <li>Real-time collaboration with WebSockets</li>
-                            <li>Advanced code analysis and visualization</li>
-                            <li>Seamless integration with modern CI/CD pipelines</li>
-                          </ul>
-                        </div>
-                      </GlassCard>
-                    </div>
-
+                        <button 
+                          onClick={() => { setCreateType('repo'); setIsCreateModalOpen(true); }}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black font-semibold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                        >
+                          <Plus size={18} />
+                          <span className="text-sm">{t('createRepo')}</span>
+                        </button>
+                      </header>
+                      <RepoList onSelect={(owner, name) => setSelectedRepo({owner, name})} language={language} />
+                    </>
+                  ) : (
                     <div className="space-y-8">
-                      <div>
-                        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">About</h3>
-                        <p className="text-sm text-zinc-300 leading-relaxed">
-                          A next-generation Git repository management platform with a stunning, ultra-modern UI.
-                        </p>
-                        <div className="mt-6 space-y-3">
-                          <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                            <BookText size={16} />
-                            <span>Readme</span>
+                      <header className="flex items-end justify-between">
+                        <div>
+                          <button 
+                            onClick={() => setSelectedRepo(null)}
+                            className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors mb-4"
+                          >
+                            <ArrowLeft size={16} />
+                            {t('backToList')}
+                          </button>
+                          <div className="flex items-center gap-3 text-zinc-500 text-sm mb-2">
+                            <Users size={14} />
+                            <span>{selectedRepo.owner}</span>
+                            <ChevronRight size={14} />
+                            <span className="text-white font-medium">{selectedRepo.name}</span>
+                            <span className="px-2 py-0.5 rounded-full border border-white/10 text-[10px] uppercase tracking-wider">{t('public')}</span>
                           </div>
-                          <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                            <Star size={16} />
-                            <span>1.2k stars</span>
-                          </div>
-                          <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                            <Eye size={16} />
-                            <span>45 watching</span>
-                          </div>
-                          <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                            <GitFork size={16} />
-                            <span>89 forks</span>
-                          </div>
+                          <h1 className="text-3xl font-bold tracking-tight">{selectedRepo.name}</h1>
                         </div>
+                        <div className="flex items-center gap-3">
+                          <button className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm font-medium hover:bg-white/10 transition-all">
+                            <Star size={16} />
+                            {t('star')}
+                            <span className="pl-2 border-l border-white/10 ml-1 text-zinc-500">1.2k</span>
+                          </button>
+                          <button className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm font-medium hover:bg-white/10 transition-all">
+                            <GitFork size={16} />
+                            {t('fork')}
+                            <span className="pl-2 border-l border-white/10 ml-1 text-zinc-500">89</span>
+                          </button>
+                        </div>
+                      </header>
+
+                      <div className="flex items-center gap-6 border-b border-white/5 pb-4">
+                        <button className="text-sm font-medium text-emerald-400 border-b-2 border-emerald-400 pb-4 -mb-4">{t('code')}</button>
+                        <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('issues')}</button>
+                        <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('pullRequests')}</button>
+                        <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('actions')}</button>
+                        <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('projects')}</button>
+                        <button className="text-sm font-medium text-zinc-500 hover:text-white transition-colors pb-4 -mb-4">{t('wiki')}</button>
                       </div>
 
-                      <div>
-                        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">Languages</h3>
-                        <div className="space-y-3">
-                          <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden flex">
-                            <div className="h-full bg-indigo-500" style={{ width: '85%' }} />
-                            <div className="h-full bg-emerald-500" style={{ width: '10%' }} />
-                            <div className="h-full bg-amber-500" style={{ width: '5%' }} />
+                      <div className="grid grid-cols-1 lg:grid-cols-4 gap-10">
+                        <div className="lg:col-span-3 space-y-6">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <button className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-medium hover:bg-white/10 transition-all">
+                                <GitBranch size={14} />
+                                main
+                              </button>
+                              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                                <GitBranch size={14} />
+                                <span className="font-medium text-zinc-300">3</span> branches
+                                <span className="mx-1">•</span>
+                                <History size={14} />
+                                <span className="font-medium text-zinc-300">124</span> tags
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 relative">
+                              <button 
+                                onClick={() => setIsCodeDropdownOpen(!isCodeDropdownOpen)}
+                                className="flex items-center gap-2 px-4 py-1.5 bg-emerald-500 text-white dark:text-black text-xs font-bold rounded-lg hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                              >
+                                <Terminal size={14} />
+                                {t('code')}
+                                <ChevronDown size={14} className={cn("transition-transform", isCodeDropdownOpen && "rotate-180")} />
+                              </button>
+
+                              <AnimatePresence>
+                                {isCodeDropdownOpen && (
+                                  <>
+                                    <div 
+                                      className="fixed inset-0 z-40" 
+                                      onClick={() => setIsCodeDropdownOpen(false)} 
+                                    />
+                                    <motion.div
+                                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                      className="absolute top-full right-0 mt-2 w-80 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden"
+                                    >
+                                      <div className="p-4 border-b border-zinc-100 dark:border-white/5">
+                                        <div className="flex items-center gap-2 mb-3">
+                                          <Terminal size={16} className="text-emerald-500" />
+                                          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{t('clone')}</span>
+                                        </div>
+                                        <div className="flex bg-zinc-100 dark:bg-white/5 p-1 rounded-lg mb-3">
+                                          <button className="flex-1 py-1 text-[10px] font-bold bg-white dark:bg-white/10 rounded-md shadow-sm">{t('https')}</button>
+                                          <button className="flex-1 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">{t('ssh')}</button>
+                                          <button className="flex-1 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors">{t('githubCli')}</button>
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-lg p-2">
+                                          <code className="text-[10px] text-zinc-600 dark:text-zinc-400 truncate flex-1">git clone {window.location.origin}/{selectedRepo.owner}/{selectedRepo.name}.git</code>
+                                          <button 
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(`git clone ${window.location.origin}/${selectedRepo.owner}/${selectedRepo.name}.git`);
+                                              setCopied(true);
+                                              setTimeout(() => setCopied(false), 2000);
+                                            }}
+                                            className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded-md transition-colors text-zinc-500"
+                                          >
+                                            {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <a 
+                                        href="/api/project-source"
+                                        download="GitNexus_Source.html"
+                                        onClick={() => setIsCodeDropdownOpen(false)}
+                                        className="w-full p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors flex items-center gap-3"
+                                      >
+                                        <Download size={16} className="text-zinc-400" />
+                                        <div className="text-xs">
+                                          <p className="font-bold text-zinc-900 dark:text-white">{t('downloadZip')}</p>
+                                        </div>
+                                      </a>
+                                    </motion.div>
+                                  </>
+                                )}
+                              </AnimatePresence>
+
+                              <a 
+                                href="/api/project-source"
+                                download="GitNexus_Source.html"
+                                className="flex items-center gap-2 px-4 py-1.5 bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white text-xs font-bold rounded-lg hover:bg-zinc-200 dark:hover:bg-white/20 transition-all border border-zinc-200 dark:border-white/10"
+                              >
+                                <Download size={14} />
+                                {t('downloadZip')}
+                              </a>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-4">
-                            <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
-                              <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                              TypeScript <span className="text-zinc-600">85%</span>
+
+                          <FileExplorer owner={selectedRepo.owner} repo={selectedRepo.name} language={language} />
+
+                          {/* README Preview */}
+                          <GlassCard className="border-white/10">
+                            <div className="bg-white/5 px-6 py-3 border-b border-white/5 flex items-center gap-2">
+                              <BookText size={16} className="text-zinc-500" />
+                              <span className="text-sm font-medium uppercase tracking-wider text-zinc-400">README.md</span>
                             </div>
-                            <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                              React <span className="text-zinc-600">10%</span>
+                            <div className="p-10 prose prose-invert max-w-none">
+                              <h1 className="text-3xl font-bold mb-6">{selectedRepo.name}</h1>
+                              <p className="text-zinc-400 mb-4">The high-performance engine powering the next generation of Git repository management.</p>
+                              <h2 className="text-xl font-bold mt-8 mb-4">Features</h2>
+                              <ul className="list-disc list-inside space-y-2 text-zinc-400">
+                                <li>Ultra-fast Git operations using native binaries</li>
+                                <li>Real-time collaboration with WebSockets</li>
+                                <li>Advanced code analysis and visualization</li>
+                                <li>Seamless integration with modern CI/CD pipelines</li>
+                              </ul>
                             </div>
-                            <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
-                              <span className="w-2 h-2 rounded-full bg-amber-500" />
-                              CSS <span className="text-zinc-600">5%</span>
+                          </GlassCard>
+                        </div>
+
+                        <div className="space-y-8">
+                          <div>
+                            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">About</h3>
+                            <p className="text-sm text-zinc-300 leading-relaxed">
+                              A next-generation Git repository management platform with a stunning, ultra-modern UI.
+                            </p>
+                            <div className="mt-6 space-y-3">
+                              <div className="flex items-center gap-3 text-zinc-500 text-sm">
+                                <BookText size={16} />
+                                <span>Readme</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-zinc-500 text-sm">
+                                <Star size={16} />
+                                <span>1.2k stars</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-zinc-500 text-sm">
+                                <Eye size={16} />
+                                <span>45 watching</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-zinc-500 text-sm">
+                                <GitFork size={16} />
+                                <span>89 forks</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4">Languages</h3>
+                            <div className="space-y-3">
+                              <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden flex">
+                                <div className="h-full bg-indigo-500" style={{ width: '85%' }} />
+                                <div className="h-full bg-emerald-500" style={{ width: '10%' }} />
+                                <div className="h-full bg-amber-500" style={{ width: '5%' }} />
+                              </div>
+                              <div className="flex flex-wrap gap-4">
+                                <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
+                                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                  TypeScript <span className="text-zinc-600">85%</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                  React <span className="text-zinc-600">10%</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest">
+                                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                  CSS <span className="text-zinc-600">5%</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -1291,6 +1398,7 @@ export default function App() {
             onClose={() => setIsCreateModalOpen(false)} 
             type={createType} 
             language={language} 
+            onSuccess={refreshData}
           />
         )}
       </AnimatePresence>
