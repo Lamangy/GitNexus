@@ -1,0 +1,90 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id            String         @id @default(cuid())
+  username      String         @unique
+  email         String         @unique
+  passwordHash  String
+  avatarUrl     String?
+  bio           String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  repositories  Repository[]
+  commits       Commit[]
+  issues        Issue[]
+  comments      Comment[]
+  stars         Star[]
+}
+
+model Repository {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?
+  isPrivate     Boolean   @default(false)
+  ownerId       String
+  owner         User      @relation(fields: [ownerId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  commits       Commit[]
+  issues        Issue[]
+  stars         Star[]
+  
+  @@unique([ownerId, name])
+}
+
+model Commit {
+  id            String     @id @default(cuid())
+  hash          String     @unique
+  message       String
+  authorId      String
+  author        User       @relation(fields: [authorId], references: [id])
+  repositoryId  String
+  repository    Repository @relation(fields: [repositoryId], references: [id])
+  createdAt     DateTime   @default(now())
+}
+
+model Issue {
+  id            String     @id @default(cuid())
+  title         String
+  content       String
+  status        String     @default("OPEN") // OPEN, CLOSED, IN_PROGRESS
+  authorId      String
+  author        User       @relation(fields: [authorId], references: [id])
+  repositoryId  String
+  repository    Repository @relation(fields: [repositoryId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  comments      Comment[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  issueId   String
+  issue     Issue    @relation(fields: [issueId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Star {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id])
+  repositoryId  String
+  repository    Repository @relation(fields: [repositoryId], references: [id])
+  createdAt     DateTime   @default(now())
+
+  @@unique([userId, repositoryId])
+}
